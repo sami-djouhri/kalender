@@ -69,13 +69,14 @@ everyone, which would flip the day type that a wake-up alarm hangs on.
 ## Tests
 
 ```bash
-./run-tests.sh        # expects "Ran 253+ tests ... OK"
+./run-tests.sh        # fails if fewer tests run than expected
 ./simulieren.sh       # 84 days of simulated everyday life, then probes over it
 ```
 
-The test runner states its expected count on purpose. Nine test modules used to
-be skipped silently because an optional dependency was missing, which meant 147
-tests passing looked exactly like 192 tests passing.
+The runner enforces a minimum test count instead of just printing one. Nine test
+modules used to be skipped silently because an optional dependency was missing,
+which meant 147 tests passing looked exactly like 192 tests passing: unittest
+reports `OK` either way, so only the count gives it away.
 
 `simulieren.sh` is the counterpart to the unit tests: those check the parts, it
 checks the interplay over weeks. Five of the findings above came out of its
