@@ -1,0 +1,40 @@
+# Secrets
+.env
+.env.*
+secrets.yaml
+secrets/
+
+# SSL
+ssl/
+*.key
+*.pem
+
+# Data
+*.db
+*.sqlite
+*.sqlite3
+data/
+db-data/
+
+# Node
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Docker
+volumes/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Voices (AI data)
+voices/
+
+# Zigbee
+zigbee.db
+

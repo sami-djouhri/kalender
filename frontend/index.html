@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#f6f1e8">
+    <title>Kalender</title>
+    <link rel="preload" href="/fonts/Inter-Regular.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/fonts/Inter-Medium.woff2" as="font" type="font/woff2" crossorigin>
+    <link href="/css/style.css?v=20260630a" rel="stylesheet">
+</head>
+<body>
+    <!-- Login -->
+    <div id="login-screen" class="login-screen">
+        <div class="login-box">
+            <h1>Kalender</h1>
+            <form id="login-form">
+                <input type="password" id="login-password" placeholder="Passwort" required autofocus>
+                <button type="submit">Anmelden</button>
+                <p id="login-error" class="error hidden"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div id="app" class="hidden">
+        <header>
+            <div class="header-left">
+                <button id="btn-sidebar-toggle" class="btn-hamburger" aria-label="Menue">&#9776;</button>
+                <h1>Kalender</h1>
+            </div>
+            <div class="header-right">
+                <button id="btn-view-toggle" class="btn-secondary" title="Ansicht wechseln">Jahresansicht</button>
+                <button id="btn-todos" class="btn-secondary">To-Dos</button>
+                <button id="btn-habits" class="btn-secondary">Habits</button>
+                <button id="btn-contacts" class="btn-secondary">Kontakte</button>
+                <button id="btn-account" class="btn-secondary btn-icon" title="Meine Daten &amp; Datenschutz">&#128451;</button>
+                <button id="btn-change-password" class="btn-secondary btn-icon" title="Passwort aendern">&#9881;</button>
+                <button id="btn-logout" class="btn-secondary">Abmelden</button>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <div id="sidebar-overlay" class="sidebar-overlay hidden"></div>
+            <aside id="sidebar">
+                <!-- Dashboard Widget -->
+                <div id="dashboard-widget" class="dashboard-widget"></div>
+                <!-- Todos Widget -->
+                <div id="todos-widget" class="todos-widget"></div>
+                <!-- Habits Widget -->
+                <div id="habits-widget" class="habits-widget"></div>
+            </aside>
+            <main>
+                <section id="focus-strip" class="focus-strip"></section>
+                <!-- Year View (scrolling months) -->
+                <div id="year-view">
+                    <div id="calendar"></div>
+                    <button id="btn-scroll-today" class="btn-scroll-today">Heute</button>
+                </div>
+
+                <!-- Month View (6x7 grid) -->
+                <div id="month-view" class="hidden">
+                    <div class="week-nav">
+                        <button id="month-prev" class="btn-secondary btn-icon">&larr;</button>
+                        <span id="month-label" class="week-label"></span>
+                        <button id="month-next" class="btn-secondary btn-icon">&rarr;</button>
+                        <button id="month-today" class="btn-secondary btn-small">Heute</button>
+                    </div>
+                    <div id="month-grid" class="month-grid"></div>
+                </div>
+
+                <!-- Week View (hourly grid) -->
+                <div id="week-view" class="hidden">
+                    <div class="week-nav">
+                        <button id="week-prev" class="btn-secondary btn-icon">&larr;</button>
+                        <span id="week-label" class="week-label"></span>
+                        <button id="week-next" class="btn-secondary btn-icon">&rarr;</button>
+                        <button id="week-today" class="btn-secondary btn-small">Heute</button>
+                    </div>
+                    <div id="week-todos-section" class="week-todos-section"></div>
+                    <div class="week-grid-wrapper">
+                        <div id="week-grid" class="week-grid"></div>
+                    </div>
+                </div>
+
+                <div id="day-detail-popup" class="day-detail-popup hidden">
+                    <div class="day-detail-header">
+                        <span id="day-detail-date" class="day-detail-date"></span>
+                        <span id="day-detail-badge" class="widget-badge"></span>
+                    </div>
+                    <div id="day-detail-events" class="day-detail-events"></div>
+                    <div class="day-detail-actions">
+                        <button class="daytype-btn daytype-arbeit" data-type="arbeit">Arbeit</button>
+                        <button class="daytype-btn daytype-schule" data-type="schule">Schule</button>
+                        <button class="daytype-btn daytype-urlaub" data-type="urlaub" data-half="false">Urlaub</button>
+                        <button class="daytype-btn daytype-urlaub-half" data-type="urlaub" data-half="true">1/2</button>
+                        <button class="daytype-btn daytype-krank" data-type="krank">Krank</button>
+                        <button class="daytype-btn daytype-event" data-type="event">+ Event</button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Event Modal -->
+    <div id="event-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="event-modal-title">Neues Event</h2>
+            <form id="event-form">
+                <input type="hidden" id="evt-id">
+                <div class="form-group">
+                    <label for="evt-title">Titel</label>
+                    <input type="text" id="evt-title" required maxlength="500">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="evt-start">Startdatum</label>
+                        <input type="date" id="evt-start" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="evt-end">Enddatum</label>
+                        <input type="date" id="evt-end" required>
+                    </div>
+                </div>
+                <div class="form-group form-checkbox">
+                    <input type="checkbox" id="evt-allday">
+                    <label for="evt-allday">Ganztaegig</label>
+                </div>
+                <div id="time-fields" class="form-row hidden">
+                    <div class="form-group">
+                        <label for="evt-start-time">Startzeit</label>
+                        <input type="time" id="evt-start-time" value="09:00">
+                    </div>
+                    <div class="form-group">
+                        <label for="evt-end-time">Endzeit</label>
+                        <input type="time" id="evt-end-time" value="10:00">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="evt-location">Ort</label>
+                    <input type="text" id="evt-location" maxlength="500" autocomplete="off">
+                    <div id="evt-location-hits" class="adress-treffer hidden"></div>
+                    <!-- Erscheint nur, wenn der Ort Koordinaten hat UND ein
+                         Wegzeit-Anbieter konfiguriert ist. Sonst bleibt „Ort“
+                         das Freitextfeld, das es immer war. -->
+                    <div id="evt-weg" class="weg-zeile hidden">
+                        <select id="evt-travel-mode"></select>
+                        <span id="evt-weg-text"></span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="evt-description">Beschreibung</label>
+                    <textarea id="evt-description" rows="3"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="evt-recurrence">Wiederholung</label>
+                        <select id="evt-recurrence">
+                            <option value="">Keine</option>
+                            <option value="FREQ=DAILY">Taeglich</option>
+                            <option value="FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR">Werktags (Mo-Fr)</option>
+                            <option value="FREQ=WEEKLY">Woechentlich</option>
+                            <option value="FREQ=WEEKLY;INTERVAL=2">Alle 2 Wochen</option>
+                            <option value="FREQ=MONTHLY">Monatlich</option>
+                            <option value="FREQ=YEARLY">Jaehrlich</option>
+                            <option value="__custom__">Benutzerdefiniert (RRULE)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="evt-reminder">Erinnerung</label>
+                        <select id="evt-reminder">
+                            <option value="">Keine</option>
+                            <option value="0">Bei Beginn</option>
+                            <option value="10">10 Min vorher</option>
+                            <option value="30">30 Min vorher</option>
+                            <option value="60">1 Std vorher</option>
+                            <option value="1440">1 Tag vorher</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group hidden" id="evt-recurrence-custom-group">
+                    <label for="evt-recurrence-custom">RRULE (iCal)</label>
+                    <input type="text" id="evt-recurrence-custom" placeholder="FREQ=WEEKLY;BYDAY=MO,WE;COUNT=10">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-delete-event" class="btn-danger hidden">Loeschen</button>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Command Palette -->
+    <div id="command-palette" class="cmd-palette hidden">
+        <div class="cmd-palette-box">
+            <input type="text" id="cmd-input" class="cmd-input" placeholder="Befehl oder Suche  (z. B. 'Event', 'Heute', '/Begriff')" autocomplete="off" spellcheck="false">
+            <ul id="cmd-list" class="cmd-list"></ul>
+            <div class="cmd-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigieren &middot; <kbd>&crarr;</kbd> ausfuehren &middot; <kbd>Esc</kbd> schliessen</div>
+        </div>
+    </div>
+
+    <!-- Recurrence Scope Modal -->
+    <div id="recurrence-scope-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 380px;">
+            <h2 id="recurrence-scope-title">Serientermin</h2>
+            <p id="recurrence-scope-text" class="muted" style="margin-bottom: 1rem;"></p>
+            <div class="recurrence-scope-actions">
+                <button type="button" class="btn-secondary" data-scope="this">Nur dieser Termin</button>
+                <button type="button" class="btn-secondary" data-scope="following">Dieser und folgende</button>
+                <button type="button" class="btn-secondary" data-scope="all">Alle Termine</button>
+                <button type="button" class="btn-text btn-cancel" data-scope="">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contacts List Modal -->
+    <div id="contacts-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 520px;">
+            <h2>Kontakte</h2>
+            <div id="contacts-list" class="contact-list-container"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-right" style="margin-left: 0; width: 100; display: flex; gap: 0.5rem;">
+                    <button type="button" id="btn-new-contact" class="btn-primary">+ Neuer Kontakt</button>
+                    <button type="button" class="btn-secondary btn-cancel" style="margin-left: auto;">Schliessen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contact Edit Modal -->
+    <div id="contact-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="contact-modal-title">Neuer Kontakt</h2>
+            <form id="contact-form">
+                <input type="hidden" id="contact-id">
+                <div class="form-group">
+                    <label for="contact-name">Name *</label>
+                    <input type="text" id="contact-name" required maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label for="contact-birthday">Geburtstag</label>
+                    <input type="date" id="contact-birthday">
+                </div>
+                <div class="form-group">
+                    <label for="contact-email">E-Mail</label>
+                    <input type="email" id="contact-email" maxlength="300">
+                </div>
+                <div class="form-group">
+                    <label for="contact-phone">Telefon</label>
+                    <input type="tel" id="contact-phone" maxlength="50">
+                </div>
+                <div class="form-group" id="contact-address-group">
+                    <label for="contact-address">Adresse</label>
+                    <input type="text" id="contact-address" maxlength="300"
+                           autocomplete="off" placeholder="Strasse Hausnummer, Ort">
+                    <div id="contact-address-hits" class="adress-treffer hidden"></div>
+                    <!-- Die kleine Karte erscheint nur, wenn Koordinaten da sind
+                         UND ein Kartendienst konfiguriert ist. Ohne beides bleibt
+                         die Adresse ein Textfeld, und das ist ein gueltiger Zustand. -->
+                    <div id="contact-map" class="mini-karte hidden">
+                        <iframe title="Lage der Adresse" loading="lazy"></iframe>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="contact-notes">Notizen</label>
+                    <textarea id="contact-notes" rows="3"></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-delete-contact" class="btn-danger hidden">Loeschen</button>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Password Change Modal -->
+    <div id="password-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <h2>Passwort aendern</h2>
+            <form id="password-form">
+                <div class="form-group">
+                    <label for="pw-current">Aktuelles Passwort</label>
+                    <input type="password" id="pw-current" required>
+                </div>
+                <div class="form-group">
+                    <label for="pw-new">Neues Passwort</label>
+                    <input type="password" id="pw-new" required minlength="4">
+                </div>
+                <div class="form-group">
+                    <label for="pw-confirm">Neues Passwort bestaetigen</label>
+                    <input type="password" id="pw-confirm" required minlength="4">
+                </div>
+                <p id="pw-error" class="error hidden"></p>
+                <p id="pw-success" class="success hidden"></p>
+                <div class="modal-actions">
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Konto & Datenschutz (DSGVO) -->
+    <div id="account-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 480px;">
+            <h2>Meine Daten &amp; Datenschutz</h2>
+            <p class="account-intro">Deine Kalenderdaten liegen self-hosted im Homelab. Kein Tracking, keine Cloud-Weitergabe. Du kannst sie jederzeit exportieren oder dein Konto vollstaendig loeschen.</p>
+
+            <div class="account-section">
+                <h3>Gespeicherte Daten</h3>
+                <div id="account-summary" class="account-summary">Wird geladen…</div>
+            </div>
+
+            <div class="account-section">
+                <h3>Datenexport</h3>
+                <p class="account-hint">Alle deine Daten als JSON (Recht auf Datenuebertragbarkeit, Art. 20 DSGVO).</p>
+                <button type="button" id="btn-account-export" class="btn-secondary">Daten exportieren (JSON)</button>
+            </div>
+
+            <div class="account-section account-danger">
+                <h3>Konto loeschen</h3>
+                <p class="account-hint">Loescht unwiderruflich alle deine Termine, Aufgaben, Kontakte, Habits und Ziele (Art. 17 DSGVO). System-Feiertage bleiben unberuehrt.</p>
+                <label for="account-delete-confirm">Zum Bestaetigen <strong>KONTO LOESCHEN</strong> eingeben:</label>
+                <input type="text" id="account-delete-confirm" placeholder="KONTO LOESCHEN" autocomplete="off">
+                <p id="account-delete-msg" class="error hidden"></p>
+                <button type="button" id="btn-account-delete" class="btn-danger">Konto endgueltig loeschen</button>
+            </div>
+
+            <div class="modal-actions">
+                <div class="modal-actions-right">
+                    <button type="button" class="btn-secondary btn-cancel">Schliessen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Habits List Modal -->
+    <div id="habits-list-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 560px;">
+            <h2>Habits</h2>
+            <div id="habits-list" class="contact-list-container"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-right" style="margin-left: 0; width: 100; display: flex; gap: 0.5rem;">
+                    <button type="button" id="btn-manage-projects" class="btn-secondary">Projekte</button>
+                    <button type="button" id="btn-new-habit" class="btn-primary">+ Neuer Habit</button>
+                    <button type="button" class="btn-secondary btn-cancel" style="margin-left: auto;">Schliessen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Habit Edit Modal -->
+    <div id="habit-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="habit-modal-title">Neuer Habit</h2>
+            <form id="habit-form">
+                <input type="hidden" id="habit-id">
+                <div class="form-row">
+                    <div class="form-group" style="flex:3">
+                        <label for="habit-name">Name *</label>
+                        <input type="text" id="habit-name" required maxlength="200">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label for="habit-color">Farbe</label>
+                        <input type="color" id="habit-color" value="#4a9eff">
+                    </div>
+                </div>
+                <div id="habit-active-row" class="form-group form-switch-row hidden">
+                    <label for="habit-active">Aktiv</label>
+                    <label class="switch">
+                        <input type="checkbox" id="habit-active" checked>
+                        <span class="switch-slider"></span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="habit-project">Projekt</label>
+                    <select id="habit-project">
+                        <option value="">-- Kein Projekt --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="habit-category">Kategorie</label>
+                    <select id="habit-category">
+                        <option value="sonstige">Sonstige</option>
+                        <option value="lernen">Lernen</option>
+                        <option value="lesen">Lesen</option>
+                    </select>
+                </div>
+                <div class="form-group form-checkbox">
+                    <input type="checkbox" id="habit-learning-mode">
+                    <label for="habit-learning-mode">Pomodoro-Tracking</label>
+                </div>
+                <div id="learning-mode-fields" class="hidden">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="habit-focus-min">Fokus (Min)</label>
+                            <input type="number" id="habit-focus-min" min="5" max="120" step="5" value="25">
+                        </div>
+                        <div class="form-group">
+                            <label for="habit-break-min">Pause (Min)</label>
+                            <input type="number" id="habit-break-min" min="1" max="30" step="1" value="5">
+                        </div>
+                    </div>
+                </div>
+                <div id="learning-category-fields" class="hidden">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="habit-wd-ratio">Wochentag-Anteil (%)</label>
+                            <input type="range" id="habit-wd-ratio" min="10" max="50" step="5" value="30">
+                            <span id="habit-wd-ratio-label" class="range-label">30%</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="habit-max-consecutive">Max Tage in Folge</label>
+                            <input type="number" id="habit-max-consecutive" min="1" max="7" step="1" value="3">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="habit-max-session">Max Session (Min)</label>
+                        <input type="number" id="habit-max-session" min="15" max="480" step="15" value="120">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="habit-target" id="habit-target-label">Stunden / Woche</label>
+                        <input type="number" id="habit-target" step="0.5" min="0.5" max="80" value="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="habit-duration">Mind. Session (Min)</label>
+                        <input type="number" id="habit-duration" step="15" min="15" max="480" value="90">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="habit-wd-start">Wochentag von</label>
+                        <input type="time" id="habit-wd-start" value="17:00">
+                    </div>
+                    <div class="form-group">
+                        <label for="habit-wd-end">Wochentag bis</label>
+                        <input type="time" id="habit-wd-end" value="20:00">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="habit-we-start">Wochenende von</label>
+                        <input type="time" id="habit-we-start" value="10:00">
+                    </div>
+                    <div class="form-group">
+                        <label for="habit-we-end">Wochenende bis</label>
+                        <input type="time" id="habit-we-end" value="18:00">
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-delete-habit" class="btn-danger hidden">Loeschen</button>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Projects List Modal -->
+    <div id="projects-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 480px;">
+            <h2>Projekte</h2>
+            <div id="projects-list" class="contact-list-container"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-right" style="margin-left: 0; width: 100; display: flex; gap: 0.5rem;">
+                    <button type="button" id="btn-new-project" class="btn-primary">+ Neues Projekt</button>
+                    <button type="button" class="btn-secondary btn-cancel" style="margin-left: auto;">Schliessen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Edit Modal -->
+    <div id="project-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <h2 id="project-modal-title">Neues Projekt</h2>
+            <form id="project-form">
+                <input type="hidden" id="project-id">
+                <div class="form-row">
+                    <div class="form-group" style="flex:3">
+                        <label for="project-name">Name *</label>
+                        <input type="text" id="project-name" required maxlength="200">
+                    </div>
+                    <div class="form-group" style="flex:1">
+                        <label for="project-color">Farbe</label>
+                        <input type="color" id="project-color" value="#6c5ce7">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="project-icon">Icon (Emoji)</label>
+                        <input type="text" id="project-icon" maxlength="10" placeholder="z.B. &#128187;">
+                    </div>
+                    <div class="form-group">
+                        <label for="project-status">Status</label>
+                        <select id="project-status">
+                            <option value="active">Aktiv</option>
+                            <option value="paused">Pausiert</option>
+                            <option value="completed">Abgeschlossen</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-delete-project" class="btn-danger hidden">Loeschen</button>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Todo Overview Modal -->
+    <div id="todos-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 560px;">
+            <h2>To-Dos</h2>
+            <div id="todos-list" class="contact-list-container"></div>
+            <div class="modal-actions">
+                <div class="modal-actions-right" style="margin-left: 0; width: 100; display: flex; gap: 0.5rem;">
+                    <button type="button" id="btn-new-todo" class="btn-primary">+ Neues To-Do</button>
+                    <label class="form-checkbox" style="font-size:0.8rem; margin-left:0.5rem; gap:0.3rem;">
+                        <input type="checkbox" id="todos-show-completed"> Erledigte
+                    </label>
+                    <button type="button" class="btn-secondary btn-cancel" style="margin-left: auto;">Schliessen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Todo Edit Modal -->
+    <div id="todo-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 480px;">
+            <h2 id="todo-modal-title">Neues To-Do</h2>
+            <form id="todo-form">
+                <input type="hidden" id="todo-id">
+                <div class="form-group">
+                    <label for="todo-title">Titel *</label>
+                    <input type="text" id="todo-title" required maxlength="500">
+                </div>
+                <div class="form-group">
+                    <label for="todo-description">Beschreibung</label>
+                    <textarea id="todo-description" rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Schnellvorlagen</label>
+                    <div id="todo-template-buttons" class="todo-template-buttons">
+                        <button type="button" class="btn-secondary btn-small todo-template-btn" data-title="Bettwaesche wechseln" data-recurrence="weekly" data-priority="mittel">Bettwaesche</button>
+                        <button type="button" class="btn-secondary btn-small todo-template-btn" data-title="Aquarium putzen" data-recurrence="biweekly" data-priority="hoch">Aquarium</button>
+                        <button type="button" class="btn-secondary btn-small todo-template-btn" data-title="Aktivkohlefilter wechseln" data-recurrence="monthly" data-priority="mittel">Aktivkohlefilter</button>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="todo-priority">Prioritaet</label>
+                        <select id="todo-priority">
+                            <option value="niedrig">Niedrig</option>
+                            <option value="mittel" selected>Mittel</option>
+                            <option value="hoch">Hoch</option>
+                            <option value="dringend">Dringend</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="todo-recurrence">Wiederholung</label>
+                        <select id="todo-recurrence">
+                            <option value="">Einmalig</option>
+                            <option value="daily">Taeglich</option>
+                            <option value="weekly">Woechentlich</option>
+                            <option value="biweekly">Alle 2 Wochen</option>
+                            <option value="monthly">Monatlich</option>
+                            <option value="quarterly">Quartalsweise</option>
+                            <option value="yearly">Jaehrlich</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="todo-due-date">Faellig am</label>
+                        <input type="date" id="todo-due-date">
+                    </div>
+                    <div class="form-group">
+                        <label for="todo-due-time">Uhrzeit</label>
+                        <input type="time" id="todo-due-time">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="todo-project">Projekt</label>
+                        <select id="todo-project">
+                            <option value="">-- Kein Projekt --</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="todo-goal">Tagesziel</label>
+                        <select id="todo-goal">
+                            <option value="">-- Kein Ziel --</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="btn-delete-todo" class="btn-danger hidden">Loeschen</button>
+                    <div class="modal-actions-right">
+                        <button type="button" class="btn-secondary btn-cancel">Abbrechen</button>
+                        <button type="submit" class="btn-primary">Speichern</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/js/app.js?v=20260630a"></script>
+</body>
+</html>

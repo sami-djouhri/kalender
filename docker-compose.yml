@@ -1,0 +1,80 @@
+services:
+  kalender:
+    build: .
+    container_name: kalender
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /run
+    ports:
+      - "127.0.0.1:8085:8085"
+    environment:
+      - TZ=Europe/Berlin
+      # Scharf seit 2026-09-04: unbekannte Query-Parameter geben 400 statt
+      # Warnung. Grundlage: 9 Tage Protokolle mit genau einer Warnquelle
+      # (days an /api/habits/sessions/upcoming), und die ist seither ein
+      # deklarierter Parameter.
+      - STRICT_QUERY_PARAMS=1
+      # Orte, Karte, Wegzeit. Alle drei sind optional und stehen hier bewusst
+      # OHNE Vorgabewert: der Kalender laeuft ohne sie vollstaendig (Adressen
+      # bleiben Text, keine Karte, keine Wegzeiten), und die Dienste dahinter
+      # sind Homelab-Infrastruktur, die eine fremde Installation nicht hat.
+      # Werte gehoeren in die .env, Beispiele stehen in die Projektregeln.
+      - ADRESS_URL=${ADRESS_URL:-}
+      - ROUTING_URL=${ROUTING_URL:-}
+      - ROUTING_ART=${ROUTING_ART:-valhalla}
+      - KARTEN_URL=${KARTEN_URL:-}
+      - WEG_STANDARD_MITTEL=${WEG_STANDARD_MITTEL:-pedestrian}
+      - WEG_PUFFER_MINUTEN=${WEG_PUFFER_MINUTEN:-5}
+      - WEG_VORLAUF_MINUTEN=${WEG_VORLAUF_MINUTEN:-45}
+    env_file:
+      - .env
+      # Getrennte Datei fuer das Mandanten-Geheimnis, NICHT in .env.
+      # Grund: host-router bindet `../kalender/.env` komplett als env_file ein,
+      # weil er genau einen Wert daraus braucht (KALENDER_PASSWORD). Alles, was in
+      # .env steht, landet damit auch in seinem Prozess: heute schon SECRET_KEY
+      # und FEED_TOKEN. Das Mandanten-Geheimnis gehoert dort nicht hin: es wuerde
+      # jedem, der den Router liest, erlauben, gueltige X-Saganta-Sub-Signaturen
+      # zu erzeugen und sich als beliebiger Mandant auszugeben.
+      # (Der Alt-Leak SECRET_KEY/FEED_TOKEN bleibt bestehen und ist ein eigener
+      # Schritt: er braucht eine eigene .env fuer den Router.)
+      - path: .env.tenant
+        required: false
+    volumes:
+      - ./data:/app/data
+    networks:
+      - cc-apps
+      - default
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8085/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.25"
+
+# ★ Lokal definiert statt `external: true` (2026-09-06). Vorher lief dieses
+# Compose nur an genau einem Ort: einem Wirt, auf dem vorher jemand `cc-apps`
+# angelegt hatte. Wer das Repo klonte und `docker compose up` tippte, bekam einen
+# Fehler ueber ein fehlendes Netz und keinen Hinweis, woher es kommen soll.
+#
+# Die Homelab-Sicht steht in `docker-compose.override.yml` und wird von Compose
+# automatisch mitgeladen. ★ Anders als bei lager/mealprep/fitness laeuft sie hier
+# NICHT ueber COMPOSE_FILE in der .env: host-router bindet `../kalender/.env`
+# komplett als env_file ein, jeder Eintrag dort landet also in einem fremden
+# Prozess. Das ist derselbe Grund, aus dem das Mandanten-Geheimnis in
+# `.env.tenant` liegt.
+#
+# ⚠️ Wer von Hand mit einer expliziten `-f`-Liste startet (etwa zusammen mit
+# `docker-compose.lan-proxy.yml`), laedt die override NICHT mit und bekommt
+# lokale Netze. Dann beide Dateien nennen.
+networks:
+  cc-apps:

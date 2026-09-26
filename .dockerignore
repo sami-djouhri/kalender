@@ -1,0 +1,17 @@
+.git
+.gitignore
+.env
+.env.*
+*.log
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+.ruff_cache
+node_modules
+*.db
+*.db-shm
+*.db-wal
+README.md
+LICENSE
+tests/
