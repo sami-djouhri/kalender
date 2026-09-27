@@ -52,14 +52,41 @@ def expected_signature(sub: str, secret: str) -> str:
 
 
 def resolve_owner_sub(request) -> str:
-    """Mandant für diesen Request. Wirft 401 nur im Erzwingen-Modus."""
+    """Mandant für diesen Request. Wirft 401 nur im Erzwingen-Modus.
+
+    Drei Quellen, in dieser Reihenfolge:
+
+    1. ``X-Saganta-Sub`` mit Signatur (Saganta-BFF, app-proxy, Torwächter-Vhost).
+    2. Das **Sitzungs-Token** dieses Kalenders (``backend/sitzung.py``), seit
+       2026-09-27. Es trägt den Mandanten, statt nur "angemeldet" zu bedeuten.
+       Ohne diesen Schritt läuft das native Frontend für **jeden** Angemeldeten auf
+       ``DEFAULT_OWNER_SUB``, und damit hätte ein zweiter Nutzer die Daten des
+       Owners gesehen, ohne dass die Trennung irgendwo versagt hätte.
+    3. ``DEFAULT_OWNER_SUB`` für die headerlosen CORE-Pfade (Home Assistant über
+       ``/api/day-type``, iCal mit Feed-Token, Postfach, Knowledge-Gateway). Das
+       ist der Vertrag, kein Übergangszustand: das Homelab *ist* der Owner.
+
+    ★ Die Reihenfolge ist Absicht. Der signierte Header ist die stärkere Aussage
+    (er wird geprüft), das Token die schwächere (es sagt nur, wer sich angemeldet
+    hat). Wo beide vorliegen, gilt der Header: genau so kann der Saganta-BFF im
+    Namen eines Mandanten fragen, auch wenn im Browser noch ein Cookie liegt.
+    """
     if request is None:
         return settings.DEFAULT_OWNER_SUB
 
     sub = request.headers.get(SUB_HEADER)
     if not sub:
-        # Headerloser Pfad: CORE. Unverändert.
-        return settings.DEFAULT_OWNER_SUB
+        # Kein Mandanten-Header: dann entscheidet das eigene Sitzungs-Token, und
+        # erst wenn auch das fehlt, der CORE-Rückfall.
+        #
+        # Der Import steht in der Funktion, nicht oben: `sitzung` liest `config`,
+        # und dieses Modul wird aus `database.get_db` gerufen. Auf Modulebene
+        # entstünde beim Start eine Kette, die schwer zu übersehen ist. Die
+        # Kosten sind ein Dict-Zugriff pro Aufruf (sys.modules).
+        from backend import sitzung
+
+        aus_token = sitzung.sub_aus_anfrage(request)
+        return aus_token or settings.DEFAULT_OWNER_SUB
 
     secret = settings.KALENDER_TENANT_SECRET
     if not secret:

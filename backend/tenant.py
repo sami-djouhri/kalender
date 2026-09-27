@@ -57,6 +57,7 @@ from backend.models import (
     Event,
     Habit,
     HabitSession,
+    MandantEinstellung,
     Place,
     Project,
     SecretaryRun,
@@ -83,6 +84,11 @@ STRICT_TENANT_MODELS = (
     SecretaryRun,
     TimeBlock,
     ZeitIst,
+    # Mandanten-eigene Einstellungen (Feed-Token je Mandant). ★ Der Mandant steht
+    # hier im Primaerschluessel und wird beim Anlegen deshalb IMMER ausdruecklich
+    # gesetzt, nicht dem before_flush-Stempel ueberlassen: ein Schluessel muss vor
+    # dem Insert vollstaendig sein. Der Eintrag hier traegt den LESEschutz.
+    MandantEinstellung,
     # Neue STRICT-Modelle hier eintragen (z.B. kuenftig ExternalCalendar/ExternalEvent
     # fuer abonnierte iCal-Feeds), mehr ist fuer die Isolation nicht noetig.
 )

@@ -38,3 +38,8 @@ voices/
 # Zigbee
 zigbee.db
 
+# Sicherungen vor Migrationen. *.db greift hier nicht: SQLite legt daneben
+# -shm und -wal an, und schon eine einzige nicht-ignorierte Datei laesst den
+# ganzen Ordner als untracked erscheinen. Der Bestand liegt im restic-Satz.
+.sicherungen/
+

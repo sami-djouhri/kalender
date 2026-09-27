@@ -1,3 +1,4 @@
+import hmac
 import logging
 import secrets
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +21,8 @@ from backend.holidays_nrw import get_nrw_holidays
 from backend.mandant_ableiten import einzigen_mandanten_ableiten
 from backend.models import ActivityFeedback, Calendar, Contact, DailyCheckIn, DailyGoal, DailyReview, Event, EventReminderLog, HabitSession, SecretaryRun, SessionNotification, Setting, TimeBlock, Todo, TodoCompletion, ZeitIst
 from backend.parameter_wache import parameter_wache
+from backend import mandant_einstellungen, sitzung
+from backend.tenant_auth import SIG_HEADER, SUB_HEADER, expected_signature
 from backend.zugriffsprotokoll import filter_installieren
 
 # Frueh und ohne Bedingung: haelt den feed_token aus uvicorns Zugriffsprotokoll
@@ -719,48 +722,67 @@ def _get_password() -> str:
 # Effektiver JWT-Schlüssel: env-Key falls gesetzt, sonst ein zufälliger Sofort-Wert,
 # der beim Startup durch den persistenten DB-Schlüssel ersetzt wird
 # (_ensure_secret_key), damit ausgestellte Tokens einen Neustart überleben.
+#
+# ★ Die Weitergabe an `sitzung` passiert direkt hier und nicht erst im Startup.
+# `sitzung` belegt sich beim Import nur aus der Umgebung und bleibt sonst leer;
+# der Zufallswert entsteht ausschliesslich an dieser Stelle. Damit tragen beide
+# garantiert denselben Wert, auch wenn eine Route vor dem Startup-Ereignis
+# erreicht wird. Zwei eigene Zufallswerte waeren der schlimmste Fall: jede Seite
+# haette ein gueltiges Geheimnis und hielte die Token der anderen fuer gefaelscht.
 _SECRET_KEY: str = settings.SECRET_KEY or secrets.token_hex(32)
+sitzung.schluessel_setzen(_SECRET_KEY)
 
 
 def _ensure_secret_key():
-    """Persistenter JWT-Schlüssel: env gewinnt, sonst DB-Setting laden/erzeugen."""
+    """Persistenter JWT-Schlüssel: env gewinnt, sonst DB-Setting laden/erzeugen.
+
+    ★★ Die Weitergabe an ``backend/sitzung`` steht am ENDE und wird in **jedem**
+    Zweig erreicht. Der erste Entwurf hatte sie nach dem ``finally`` stehen, und
+    der Env-Zweig oben hat ein eigenes ``return``: im Betrieb ist ``SECRET_KEY``
+    per Umgebung gesetzt, also wäre genau der genommen worden, ``sitzung`` hätte
+    keinen Schlüssel bekommen und **jede Anmeldung** hätte nach dem Aufspielen
+    401 geliefert. Aufgefallen ist das nur, weil ``token_bauen`` ohne Schlüssel
+    wirft statt mit dem leeren zu signieren.
+    """
     global _SECRET_KEY
     if settings.SECRET_KEY:
         _SECRET_KEY = settings.SECRET_KEY
-        return
-    db = next(system_db())
-    try:
-        row = db.query(Setting).filter(Setting.key == "secret_key").first()
-        if row and row.value:
-            _SECRET_KEY = row.value
-        else:
-            _SECRET_KEY = secrets.token_hex(32)
-            db.add(Setting(key="secret_key", value=_SECRET_KEY))
-            db.commit()
-            import logging
-            logging.getLogger(__name__).warning(
-                "SECRET_KEY nicht via Env gesetzt: persistenter Schlüssel in DB erzeugt. "
-                "Für Multi-Instance/Rotation SECRET_KEY als Umgebungsvariable setzen."
-            )
-    finally:
-        db.close()
+    else:
+        db = next(system_db())
+        try:
+            row = db.query(Setting).filter(Setting.key == "secret_key").first()
+            if row and row.value:
+                _SECRET_KEY = row.value
+            else:
+                _SECRET_KEY = secrets.token_hex(32)
+                db.add(Setting(key="secret_key", value=_SECRET_KEY))
+                db.commit()
+                logging.getLogger(__name__).warning(
+                    "SECRET_KEY nicht via Env gesetzt: persistenter Schlüssel in DB erzeugt. "
+                    "Für Multi-Instance/Rotation SECRET_KEY als Umgebungsvariable setzen."
+                )
+        finally:
+            db.close()
+
+    # Der Schluessel hat genau eine Quelle, und ab hier kennt ihn auch
+    # backend/sitzung.py -- das Modul, das tenant_auth fuer den Mandanten aus dem
+    # Token braucht und das main nicht importieren darf (Zyklus).
+    sitzung.schluessel_setzen(_SECRET_KEY)
 
 
-def create_jwt_token() -> str:
-    payload = {
-        "sub": "admin",
-        "exp": datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRATION_HOURS),
-        "iat": datetime.now(timezone.utc),
-    }
-    return jwt.encode(payload, _SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+def create_jwt_token(sub: str | None = None) -> str:
+    """Sitzungs-Token. Ohne Angabe fuer den Owner (nativer Passwort-Login).
+
+    Das Token trug bis 2026-09-27 fest ``sub: "admin"``, also keinen Mandanten.
+    Wer sich anmeldete, bekam damit immer die Sicht des Owners. Begruendung und
+    Umgang mit dem Altbestand: backend/sitzung.py.
+    """
+    return sitzung.token_bauen(sub or settings.DEFAULT_OWNER_SUB)
 
 
 def verify_jwt_token(token: str) -> bool:
-    try:
-        jwt.decode(token, _SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        return True
-    except jwt.PyJWTError:
-        return False
+    """Nur die Frage, ob das Token gueltig ist. Fuer den Mandanten: sitzung.sub_aus_token."""
+    return sitzung.sub_aus_token(token) is not None
 
 
 def _set_session_cookie(response, token: str):
@@ -776,19 +798,16 @@ def _set_session_cookie(response, token: str):
     return response
 
 
-def get_current_user(request: Request):
-    # Check Authorization header
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-        if verify_jwt_token(token):
-            return True
+def get_current_user(request: Request) -> str:
+    """Der angemeldete Mandant, oder 401.
 
-    # Check cookie
-    token = request.cookies.get("session_token")
-    if token and verify_jwt_token(token):
-        return True
-
+    Gibt seit 2026-09-27 den ``sub`` zurueck statt ``True``. Beides ist wahr, die
+    bestehenden ``dependencies=[Depends(get_current_user)]`` bleiben also
+    unveraendert gueltig; wer den Mandanten braucht, kann ihn jetzt bekommen.
+    """
+    sub = sitzung.sub_aus_anfrage(request)
+    if sub:
+        return sub
     raise HTTPException(status_code=401, detail="Not authenticated")
 
 
@@ -837,19 +856,14 @@ def logout():
 
 @app.post("/api/auth/refresh", response_model=TokenResponse)
 def refresh_token(request: Request):
-    token = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    if not token:
-        token = request.cookies.get("session_token")
+    token = sitzung.token_aus_anfrage(request)
     if not token:
         raise HTTPException(status_code=401, detail="Missing token")
 
     try:
         payload = jwt.decode(
             token,
-            _SECRET_KEY,
+            sitzung.schluessel(),
             algorithms=[settings.JWT_ALGORITHM],
             options={"verify_exp": False},
         )
@@ -863,7 +877,13 @@ def refresh_token(request: Request):
     if datetime.now(timezone.utc) - issued_at > timedelta(days=settings.JWT_REFRESH_GRACE_DAYS):
         raise HTTPException(status_code=401, detail="Token too old to refresh")
 
-    new_token = create_jwt_token()
+    # ★ Der Mandant muss mit. Ein Refresh, der `create_jwt_token()` ohne Argument
+    # ruft, macht aus der Sitzung eines zweiten Nutzers stillschweigend eine
+    # Owner-Sitzung, und zwar erst nach Stunden, wenn das Frontend verlaengert.
+    # Der Ablauf wird hier absichtlich nicht geprueft (Nachfrist oben), deshalb
+    # `ablauf_pruefen=False`.
+    alter_sub = sitzung.sub_aus_token(token, ablauf_pruefen=False)
+    new_token = create_jwt_token(alter_sub)
     response = JSONResponse(
         content={"access_token": new_token, "token_type": "bearer"}
     )
@@ -894,23 +914,106 @@ def auth_status(request: Request):
         return {"authenticated": False}
 
 
+def _sicheres_ziel(redirect: str) -> str:
+    """Nur Ziele auf diesem Dienst. Alles andere wird zur Wurzel.
+
+    ★ Beide Anmeldewege hier nehmen ein Ziel aus der Adresse und leiten dorthin
+    weiter, nachdem sie ein Sitzungs-Cookie gesetzt haben. Ohne diese Pruefung ist
+    das ein offener Weiterleiter an einem Anmeldepunkt: ein Link auf
+    ``…/api/auth/token-login?token=…&redirect=https://fremde.seite`` sieht aus wie
+    eine Adresse des eigenen Kalenders, meldet an und schickt den Benutzer dann
+    woandershin. Ein Schema-relativer Wert (``//fremd.example``) traegt dasselbe
+    Risiko, deshalb faellt der Doppel-Slash mit heraus.
+    """
+    if not redirect.startswith("/") or redirect.startswith("//"):
+        return "/"
+    return redirect
+
+
 @app.get("/api/auth/token-login")
-def token_login(token: str = Query(...), redirect: str = Query("/"), db: Session = Depends(get_db)):
-    """Auto-login via feed token – sets session cookie and redirects."""
-    stored = db.query(Setting).filter(Setting.key == "feed_token").first()
-    if not stored or token != stored.value:
+def token_login(token: str = Query(...), redirect: str = Query("/")):
+    """Auto-login via feed token – sets session cookie and redirects.
+
+    Seit 2026-09-27 wird der Token **aufgeloest**, statt nur gegen den einen
+    globalen verglichen zu werden: der Owner-Token ergibt eine Owner-Sitzung
+    (unveraendert, daran haengt der Vhost-Auto-Login), ein Mandanten-Token die
+    Sitzung dieses Mandanten.
+
+    ★ Bewusst **ohne** ``Depends(get_db)``: die Aufloesung muss ungescopt suchen,
+    weil sie erst herausfindet, wer der Mandant ist. Eine gescopte Session sieht
+    nur die Zeilen des schon bestimmten Mandanten -- und der waere hier per
+    Rueckfall der Owner, also wuerde ein fremder Token nie gefunden und die
+    Anmeldung landete beim Owner. Genau die Sorte Fehler, die aussieht wie ein
+    funktionierender Login.
+    """
+    db = next(system_db())
+    try:
+        sub = mandant_einstellungen.mandant_fuer_feed_token(db, token)
+    finally:
+        db.close()
+    if not sub:
         raise HTTPException(status_code=401, detail="Invalid token")
-    jwt_token = create_jwt_token()
-    response = RedirectResponse(url=redirect, status_code=302)
-    return _set_session_cookie(response, jwt_token)
+    response = RedirectResponse(url=_sicheres_ziel(redirect), status_code=302)
+    return _set_session_cookie(response, create_jwt_token(sub))
+
+
+@app.get("/api/auth/gate-login")
+def gate_login(request: Request, redirect: str = Query("/")):
+    """Anmeldung fuer den Weg ueber einen vorgeschalteten Torwaechter.
+
+    **Das Loch, das dieser Endpunkt schliesst.** Die Vhosts ``calendar.home.arpa``
+    und ``mail.saganta.*`` pruefen im dev-portal per ``auth_request`` gegen
+    ``shell-api:/auth/check``, und der beantwortet nur, **ob** jemand angemeldet ist.
+    Dahinter schrieb nginx den ersten Aufruf auf ``token-login?token=<feed_token>``
+    um, und der feed_token ist der des Owners: jeder angemeldete Saganta-Nutzer
+    landete damit in dessen Kalender. Nicht durch einen Fehler in der
+    Mandantentrennung, sondern daran vorbei.
+
+    Hier kommt stattdessen der **signierte** Mandant an (``X-Saganta-Sub`` plus
+    ``X-Saganta-Sub-Sig``, gesetzt vom Torwaechter, der die Sitzung geprueft hat)
+    und wird gegen ein Sitzungs-Token fuer genau diesen Mandanten getauscht.
+
+    ★★ **Fail-closed, und zwar strenger als ``resolve_owner_sub``.** Dort darf ein
+    unsignierter Header in der Beobachtungsphase durchgehen, weil er nur die Sicht
+    auf Daten steuert und der Zugang vorher schon geprueft wurde. Hier ist der
+    Header der Zugang selbst. Ohne Geheimnis und ohne gueltige Signatur wird nichts
+    ausgestellt, unabhaengig von ``TENANT_HEADER_ENFORCE`` -- sonst waere das der
+    bequemste Anmelde-Bypass des ganzen Hauses.
+    """
+    secret = settings.KALENDER_TENANT_SECRET
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail="KALENDER_TENANT_SECRET nicht konfiguriert, Gate-Anmeldung deaktiviert",
+        )
+    sub = (request.headers.get(SUB_HEADER) or "").strip()
+    signatur = request.headers.get(SIG_HEADER, "")
+    if not sub or not signatur:
+        raise HTTPException(status_code=401, detail="Mandant oder Signatur fehlt")
+    if not hmac.compare_digest(signatur, expected_signature(sub, secret)):
+        logging.getLogger(__name__).warning(
+            "Gate-Anmeldung mit falscher Signatur abgelehnt (sub=%s…)", sub[:8]
+        )
+        raise HTTPException(status_code=401, detail="Signatur ungueltig")
+
+    response = RedirectResponse(url=_sicheres_ziel(redirect), status_code=302)
+    return _set_session_cookie(response, create_jwt_token(sub))
 
 
 # --- Feed token endpoint ---
 
-@app.get("/api/feed-token", dependencies=[Depends(get_current_user)])
-def get_feed_token(db: Session = Depends(get_db)):
-    setting = db.query(Setting).filter(Setting.key == "feed_token").first()
-    return {"feed_token": setting.value if setting else None}
+@app.get("/api/feed-token")
+def get_feed_token(sub: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Der Feed-Token DES ANGEMELDETEN Mandanten.
+
+    ★ Bis 2026-09-27 stand hier ``db.query(Setting).filter(key == "feed_token")``,
+    also der eine globale Wert: der Endpunkt gab **jedem** den Token des Owners,
+    und wer ihn hat, oeffnet ueber ``token-login`` dessen ganzen Kalender. Das war
+    harmlos, solange es nur einen Mandanten gab, und wird mit dem zweiten zur
+    stillen Uebernahme. Der ``kalender-bff`` hielt deshalb einen eigenen
+    Owner-Riegel davor; der ist jetzt nicht mehr die einzige Sperre.
+    """
+    return {"feed_token": mandant_einstellungen.feed_token_fuer(db, sub)}
 
 
 # --- Dashboard widget ---

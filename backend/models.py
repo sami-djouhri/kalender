@@ -20,10 +20,41 @@ def utcnow() -> datetime:
 
 
 class Setting(Base):
+    """App-globale Werte. Bewusst OHNE owner_sub, siehe MandantEinstellung."""
+
     __tablename__ = "settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class MandantEinstellung(Base):
+    """Dasselbe wie Setting, aber je Mandant.
+
+    **Warum eine zweite Tabelle und kein owner_sub in settings.** In ``settings``
+    liegen fuenf Arten von Werten durcheinander: der Feed-Token und das Passwort
+    (gehoeren einem Menschen), der JWT-Signierschluessel und ein Migrationsmarker
+    (gehoeren der Installation) und die vier Sekretaer-Schalter. Wer die Tabelle
+    tenantisiert, trifft alle fuenf. Genau davor warnt ``backend/tenant.py``, und
+    zwar mit Grund: ``_ensure_feed_token`` und ``_ensure_password`` laufen beim
+    Start ueber ``system_db()`` (ungescopt) und schreiben Zeilen ohne Mandanten,
+    waehrend die Leseroute gescopt fragt. Sie wuerde die Zeile dann nicht mehr
+    finden -- und an genau diesem Feed-Token haengt ``/api/day-type/today``, also
+    die Weckkette in Home Assistant.
+
+    Deshalb bleibt ``settings`` unberuehrt und global, und alles, was einem
+    Mandanten gehoert, kommt hierher. Der Owner behaelt seinen Wert in
+    ``settings``: so bleibt der eingefrorene Homelab-Vertrag (Ebene 1) Wort fuer
+    Wort derselbe, und ein zweiter Mandant bekommt einen eigenen Token, statt dem
+    Owner seinen wegzunehmen.
+    """
+
+    __tablename__ = "mandant_einstellungen"
+
+    owner_sub: Mapped[str] = mapped_column(String(128), primary_key=True, index=True)
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class Calendar(Base):

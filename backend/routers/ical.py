@@ -8,17 +8,42 @@ from icalendar.prop import vRecur
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import Calendar, Event, Setting
+from backend.models import Calendar, Event
 from backend.recurrence import parse_exdates
 
 router = APIRouter(tags=["ical"])
 
 
 def verify_feed_token(token: str, db: Session) -> bool:
-    setting = db.query(Setting).filter(Setting.key == "feed_token").first()
-    if not setting:
+    """Gueltiger Feed-Token? Seit 2026-09-27 auch der eines zweiten Mandanten.
+
+    ★★ Die Funktion **hebt die Session auf den Mandanten des Tokens**, und das ist
+    der eigentliche Punkt: ohne Header und ohne Cookie faellt ``get_db`` auf
+    ``DEFAULT_OWNER_SUB`` zurueck. Ein zweiter Mandant haette mit seinem eigenen
+    Token also die Termine des Owners als iCal abonniert -- eine Abwanderung von
+    Daten, die kein 403 und keine Fehlermeldung erzeugt, weil formal alles stimmt.
+
+    ``session.info["owner_sub"]`` wird vom ORM-Scoping bei **jeder** Abfrage neu
+    gelesen (``backend/tenant.do_orm_execute``), das Umstellen mitten in der
+    Session wirkt also fuer alles, was die Route danach liest.
+
+    Der Owner-Fall bleibt Wort fuer Wort derselbe: sein Token loest auf
+    ``DEFAULT_OWNER_SUB`` auf, und das steht dort schon.
+    """
+    from backend.database import system_db
+    from backend.mandant_einstellungen import mandant_fuer_feed_token
+
+    # Die Aufloesung braucht eine ungescopte Sicht: sie beantwortet erst, wer der
+    # Mandant ist. Deshalb eine eigene System-Session und nicht die der Route.
+    system = next(system_db())
+    try:
+        sub = mandant_fuer_feed_token(system, token)
+    finally:
+        system.close()
+    if not sub:
         return False
-    return token == setting.value
+    db.info["owner_sub"] = sub
+    return True
 
 
 def _new_calendar(name: str) -> ICalCalendar:

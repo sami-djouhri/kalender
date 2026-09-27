@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config import settings as app_settings
+from backend import mandant_einstellungen
 from backend.database import SessionLocal
 from backend.models import (
     Contact,
@@ -70,14 +71,35 @@ def _clock(value: datetime) -> str:
     return _as_berlin(value).strftime("%H:%M")
 
 
-# --- Konfiguration (settings-Tabelle, global) ---
+# --- Konfiguration (je Mandant, siehe backend/mandant_einstellungen.py) ---
+
+def _mandant(db: Session) -> str:
+    """Mandant dieser Session; ohne Angabe der Owner (headerlose CORE-Pfade)."""
+    return db.info.get("owner_sub") or app_settings.DEFAULT_OWNER_SUB
+
 
 def get_config(db: Session) -> dict:
-    """Sekretär-Konfiguration aus der settings-Tabelle (mit Defaults)."""
-    rows = {
-        s.key: s.value
-        for s in db.query(Setting).filter(Setting.key.in_(CONFIG_KEYS.keys())).all()
-    }
+    """Sekretär-Konfiguration DIESES Mandanten (mit Defaults).
+
+    Die vier Werte lagen bis 2026-09-27 global in ``settings``: zwei Mandanten
+    teilten sich also einen Schalter, eine Morgenstunde und eine Abendstunde, und
+    wer sie umstellte, stellte sie für alle um. Sie liegen jetzt je Mandant.
+
+    ★ Der Rückfall auf die alten globalen Zeilen gilt **nur für den Owner**. Sonst
+    erbte jeder neue Mandant dessen Einstellungen, und das sähe wie eine bewusste
+    Vorgabe aus, obwohl es ein Altbestand ist. (Gemessen am 2026-09-27: in dieser
+    Installation liegt keiner der vier Werte überhaupt vor, der Sekretär lief immer
+    auf Vorgaben. Das Umstellen kostet hier deshalb keine Migration.)
+    """
+    sub = _mandant(db)
+    rows = {}
+    for key in CONFIG_KEYS:
+        wert = mandant_einstellungen.wert_lesen(db, sub, key)
+        if wert is not None:
+            rows[key] = wert
+    if sub == app_settings.DEFAULT_OWNER_SUB:
+        for s in db.query(Setting).filter(Setting.key.in_(CONFIG_KEYS.keys())).all():
+            rows.setdefault(s.key, s.value)
     def _bool(key: str) -> bool:
         return rows.get(key, CONFIG_KEYS[key]) not in ("0", "false", "False", "")
     def _hour(key: str) -> int:
@@ -109,12 +131,7 @@ def set_config(db: Session, **kwargs) -> dict:
             str_val = "1" if val else "0"
         else:
             str_val = str(max(0, min(23, int(val))))
-        row = db.query(Setting).filter(Setting.key == key).first()
-        if row:
-            row.value = str_val
-        else:
-            db.add(Setting(key=key, value=str_val))
-    db.commit()
+        mandant_einstellungen.wert_setzen(db, _mandant(db), key, str_val)
     return get_config(db)
 
 

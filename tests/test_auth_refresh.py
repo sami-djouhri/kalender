@@ -50,7 +50,34 @@ class AuthRefreshTest(unittest.TestCase):
             settings.SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM],
         )
-        self.assertEqual(decoded["sub"], "admin")
+        # Hier stand `"admin"`, also der Platzhalter, den jedes Token bis
+        # 2026-09-27 trug. `_mint` baut oben bewusst weiter ein solches Token
+        # (Altbestand), und der Refresh hebt es auf die neue Form: aus dem
+        # Platzhalter wird die echte Kennung des Owners. Der alte Erwartungswert
+        # haette die Bauart festgeschrieben, die gerade abgeschafft wurde.
+        self.assertEqual(decoded["sub"], settings.DEFAULT_OWNER_SUB)
+
+    def test_refresh_hebt_altbestand_auf_die_neue_form(self):
+        """Der Uebergang selbst, als eigener Fall festgehalten.
+
+        Ein Token mit dem alten Platzhalter bleibt gueltig (sonst waere mit dem
+        Aufspielen jede offene Sitzung weg), verliert ihn aber beim ersten
+        Erneuern. Nach der Token-Laufzeit existiert die alte Form damit nicht mehr,
+        ohne dass jemand etwas merkt.
+        """
+        now = datetime.now(timezone.utc)
+        alt = _mint(now, now + timedelta(hours=1))
+        self.assertEqual(
+            jwt.decode(alt, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])["sub"],
+            "admin",
+        )
+        r = self.client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {alt}"})
+        self.assertEqual(r.status_code, 200, r.text)
+        neu = jwt.decode(
+            r.json()["access_token"], settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+        )
+        self.assertNotEqual(neu["sub"], "admin")
+        self.assertEqual(neu["sub"], settings.DEFAULT_OWNER_SUB)
 
     def test_refresh_with_expired_but_within_grace_succeeds(self):
         now = datetime.now(timezone.utc)
